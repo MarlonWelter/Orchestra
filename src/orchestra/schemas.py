@@ -11,7 +11,9 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
+
+# Any is used in several dict/list type annotations throughout this module.
 
 
 # ---------------------------------------------------------------------------
@@ -52,7 +54,7 @@ class AgentTurnResult(BaseModel):
     agent_id: str
     response: str
     handoff: Handoff
-    notes: list[str] = []
+    notes: list[str] = Field(default_factory=list)
 
     @field_validator("response")
     @classmethod
@@ -90,7 +92,7 @@ class ModelRequest(BaseModel):
     agent_id: str
     model_profile: str
     messages: list[dict[str, Any]]
-    response_schema: Any | None = None
+    response_schema_name: str = "AgentTurnResult"
     tools: list[dict[str, Any]] | None = None
     temperature: float | None = None
     max_tokens: int | None = None
@@ -100,7 +102,7 @@ class ModelRequest(BaseModel):
 class ModelResponse(BaseModel):
     text: str | None = None
     structured_output: AgentTurnResult | None = None
-    tool_calls: list[dict[str, Any]] = []
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
     usage: ModelUsage = ModelUsage()
     model: str = ""
     provider: str | None = None
@@ -156,12 +158,12 @@ class TurnRecord(BaseModel):
     energy_before: int = 0
     energy_cost: int = 0
     energy_after: int = 0
-    logical_input: dict[str, Any] = {}
-    assembled_input: dict[str, Any] = {}
-    model_response: dict[str, Any] = {}
-    parsed_result: dict[str, Any] = {}
-    validation: ValidationResult = ValidationResult(valid=True)
-    repair_attempts: list[RepairAttempt] = []
+    logical_input: dict[str, Any] = Field(default_factory=dict)
+    assembled_input: dict[str, Any] = Field(default_factory=dict)
+    model_response: dict[str, Any] = Field(default_factory=dict)
+    parsed_result: dict[str, Any] = Field(default_factory=dict)
+    validation: ValidationResult = Field(default_factory=lambda: ValidationResult(valid=True))
+    repair_attempts: list[RepairAttempt] = Field(default_factory=list)
     error: str | None = None
 
 
@@ -179,6 +181,6 @@ class RunState(BaseModel):
     started_at: str = ""
     completed_at: str | None = None
     energy: EnergyState = EnergyState(initial=0, used=0, remaining=0)
-    turns: list[TurnSummary] = []
+    turns: list[TurnSummary] = Field(default_factory=list)
     final_answer: str | None = None
     error: str | None = None

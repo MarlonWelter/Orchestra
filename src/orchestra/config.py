@@ -8,7 +8,7 @@ on any violation so the engine never starts with a broken config.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -102,12 +102,34 @@ def load_config(path: Path) -> TeamConfig:
             raise ConfigError(f"models.{profile_name} must be a mapping")
         provider = _require_str(profile_raw, f"models.{profile_name}.provider")
         model = _require_str(profile_raw, f"models.{profile_name}.model")
+        temperature = profile_raw.get("temperature")
+        if temperature is not None and not isinstance(temperature, (int, float)):
+            raise ConfigError(
+                f"models.{profile_name}.temperature must be a number, "
+                f"got: {temperature!r}"
+            )
+        max_tokens = profile_raw.get("max_tokens")
+        if max_tokens is not None and (
+            not isinstance(max_tokens, int) or max_tokens <= 0
+        ):
+            raise ConfigError(
+                f"models.{profile_name}.max_tokens must be a positive integer, "
+                f"got: {max_tokens!r}"
+            )
+        timeout_seconds = profile_raw.get("timeout_seconds")
+        if timeout_seconds is not None and (
+            not isinstance(timeout_seconds, int) or timeout_seconds <= 0
+        ):
+            raise ConfigError(
+                f"models.{profile_name}.timeout_seconds must be a positive integer, "
+                f"got: {timeout_seconds!r}"
+            )
         models[profile_name] = ModelProfileConfig(
             provider=provider,
             model=model,
-            temperature=profile_raw.get("temperature"),
-            max_tokens=profile_raw.get("max_tokens"),
-            timeout_seconds=profile_raw.get("timeout_seconds"),
+            temperature=float(temperature) if temperature is not None else None,
+            max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
         )
 
     # --- Agents ---
@@ -123,7 +145,13 @@ def load_config(path: Path) -> TeamConfig:
         role_prompt_str = _require_str(agent_raw, f"agents.{agent_id}.role_prompt")
         role_prompt = (base_dir / role_prompt_str).resolve()
         model_profile = _require_str(agent_raw, f"agents.{agent_id}.model_profile")
-        can_finalize = bool(agent_raw.get("can_finalize", False))
+        can_finalize_raw = agent_raw.get("can_finalize", False)
+        if not isinstance(can_finalize_raw, bool):
+            raise ConfigError(
+                f"agents.{agent_id}.can_finalize must be a boolean (true/false), "
+                f"got: {can_finalize_raw!r}"
+            )
+        can_finalize = can_finalize_raw
         can_handoff_to_raw = agent_raw.get("can_handoff_to")
         can_handoff_to: list[str] | None = None
         if can_handoff_to_raw is not None:
@@ -131,7 +159,13 @@ def load_config(path: Path) -> TeamConfig:
                 raise ConfigError(
                     f"agents.{agent_id}.can_handoff_to must be a list"
                 )
-            can_handoff_to = [str(r) for r in can_handoff_to_raw]
+            for i, recipient in enumerate(can_handoff_to_raw):
+                if not isinstance(recipient, str) or not recipient.strip():
+                    raise ConfigError(
+                        f"agents.{agent_id}.can_handoff_to[{i}] must be a "
+                        f"non-empty string, got: {recipient!r}"
+                    )
+            can_handoff_to = list(can_handoff_to_raw)
 
         agents[agent_id] = AgentConfig(
             id=agent_id,
@@ -144,7 +178,6 @@ def load_config(path: Path) -> TeamConfig:
 
     # --- Cross-reference validation ---
     _validate(
-        team_id=team_id,
         entry_agent=entry_agent,
         models=models,
         agents=agents,
@@ -162,7 +195,6 @@ def load_config(path: Path) -> TeamConfig:
 
 def _validate(
     *,
-    team_id: str,
     entry_agent: str,
     models: dict[str, ModelProfileConfig],
     agents: dict[str, AgentConfig],
