@@ -13,71 +13,108 @@ Three architectural options were considered:
 | Approach | Summary |
 |---|---|
 | Direct provider SDKs | Call OpenAI, Anthropic, Google, etc. using their native SDKs directly |
-| LiteLLM (library) | Universal Python library that wraps 100+ providers behind a single OpenAI-compatible interface |
+| LiteLLM (library) | Universal Python library that wraps many providers behind a single OpenAI-compatible interface |
 | LLM Gateway (proxy) | A separate HTTP service (e.g. LiteLLM Proxy, OpenRouter) that Orchestra routes requests through |
 
 ### Direct provider SDKs
 
-Each provider has its own client, auth pattern, and response format. Switching models requires code changes that touch the engine layer. This directly contradicts Orchestra's design goal of keeping agent identity separate from model backend — rejected.
+Each provider has its own client, auth pattern, and response format. Switching models requires code changes that touch the engine layer. This directly contradicts Orchestra's design goal of keeping agent identity separate from model backend — rejected for v1.
 
 ### LiteLLM Gateway / Proxy
 
-Adds production-grade features: automatic failover, semantic caching, spend limits, audit logs. Budget enforcement can happen at the request level (reject before hitting the provider). Good upgrade path for power users.
+A proxy adds production-grade features: automatic failover, semantic caching, spend limits, audit logs, central credential management, and request-level budget enforcement before hitting the provider. This is a good upgrade path for power users.
 
-However, it requires users to run a sidecar service before they can try Orchestra. Over-engineered for an open-source framework at v1 — deferred.
+However, it requires users to run a sidecar service before they can try Orchestra. That is too much operational overhead for a first open-source version — deferred.
 
 ### LiteLLM (library)
 
-Open-source Python library that normalizes provider APIs into a single interface. A model is just a string: `"openai/gpt-4o"`, `"anthropic/claude-sonnet-4-6"`, `"ollama/llama3"`. Widely adopted (Agent Zero, DSPy, Agno, and others use it).
+LiteLLM as a library normalizes provider APIs into a single interface. A model can be addressed as a string such as `openai/gpt-4o`, `anthropic/claude-sonnet-4-6`, or `ollama/llama3`.
 
 ## Decision
 
-Use **LiteLLM as a Python library dependency** for v1.
+Use **LiteLLM as a Python library dependency** for v1, wrapped behind a thin internal Orchestra model client.
+
+Orchestra agent logic must not call `litellm.completion(...)` directly. All calls go through a small internal model client boundary responsible for request normalization, logging, error handling, usage capture, retry policy, energy accounting, and test fakes.
 
 ## Reasoning
 
 **1. Direct mapping to Orchestra's architecture.**  
-Each agent config stores a `model` string. The engine calls `litellm.completion(model=agent.model, messages=...)`. Agent identity and model backend are cleanly separated with no extra abstraction needed.
+Agents should be independent from model backends. Each agent references a `model_profile`, not a raw provider/model string. The model profile is resolved at runtime by the engine.
 
-**2. Orchestra's sequential design sidesteps LiteLLM's main weakness.**  
-LiteLLM's concurrency and asyncio overhead only matters for parallel workloads. Orchestra is explicitly turn-based and sequential, so this does not apply.
+**2. Model profiles scale better than inline model strings.**  
+A team can assign several agents to the same profile, for example `frontier`, `cheap`, or `local`. Swapping the model for an entire class of agents then requires one config change instead of editing every agent.
 
-**3. Energy budget comes for free.**  
-Every LiteLLM response includes `response.usage.total_tokens`. The engine can translate token usage into energy cost per turn without extra instrumentation.
+**3. A thin wrapper is the right boundary.**  
+Even though LiteLLM provides the provider abstraction, Orchestra still needs one internal boundary for concerns that belong to the engine: run IDs, turn IDs, structured output validation, retries, usage normalization, logging, and tests.
 
-**4. Local models at zero cost.**  
-Users who prefer not to pay API costs can point any agent at `"ollama/mistral"` with no code changes. This lowers the barrier to adoption.
+**4. Orchestra's sequential design sidesteps LiteLLM's main weakness.**  
+LiteLLM's concurrency and asyncio overhead matters mainly for parallel workloads. Orchestra v1 is explicitly turn-based and sequential, so this is not a major concern.
 
-**5. Clear upgrade path.**  
-LiteLLM as a library can be transparently pointed at a LiteLLM Proxy if a user later wants gateway features. Orchestra's engine code does not need to change.
+**5. Local models remain easy.**  
+Users who prefer not to pay API costs can point a model profile at something like `ollama/mistral` with no engine changes. This lowers the barrier to adoption.
+
+**6. Clear upgrade path.**  
+The internal model client can later route through LiteLLM Proxy without changing agent logic. The proxy path is deferred, not rejected.
 
 ## Engine interface
 
-The intended call pattern:
+The intended config pattern:
 
-```python
-# Agent config (stored, serializable)
-agent = {
-    "id": "risk_analyst",
-    "model": "anthropic/claude-sonnet-4-6",  # just a string
-    "role_prompt": "You are a skeptical risk analyst...",
-}
+```yaml
+models:
+  frontier:
+    provider: litellm
+    model: anthropic/claude-sonnet-4-6
+    temperature: 0.2
 
-# Engine call — identical for every agent regardless of provider
-response = litellm.completion(
-    model=agent["model"],
-    messages=build_prompt(agent, conversation_history),
-)
+  cheap:
+    provider: litellm
+    model: openai/gpt-4o-mini
+    temperature: 0.2
 
-# Energy accounting
-energy_used = response.usage.total_tokens / TOKENS_PER_ENERGY_UNIT
+  local:
+    provider: litellm
+    model: ollama/mistral
+    temperature: 0.2
+
+agents:
+  risk_analyst:
+    model_profile: frontier
+    role_prompt: agents/risk_analyst.md
 ```
 
-The `model` string is the only thing that changes between a cheap local agent and an expensive frontier model.
+The intended engine call pattern:
+
+```python
+request = ModelRequest(
+    run_id=run.id,
+    turn_id=turn.id,
+    agent_id=agent.id,
+    model_profile=agent.model_profile,
+    messages=build_messages(agent, conversation_history),
+    response_schema=AgentTurnResult,
+)
+
+response = model_client.complete(request)
+```
+
+The internal `ModelClient` resolves the model profile and calls LiteLLM.
+
+## Energy accounting
+
+For v1, energy accounting remains intentionally simple:
+
+- each model call costs `1` energy;
+- token usage is logged on every turn;
+- token usage does not yet affect budget enforcement.
+
+This keeps the first execution loop easy to reason about while preserving the data needed for later cost-aware accounting.
 
 ## Consequences
 
-- LiteLLM becomes a required dependency.
-- Provider API keys are configured per-provider in the environment (LiteLLM reads standard env vars like `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`).
-- Tool definitions must use LiteLLM's unified schema rather than provider-specific formats — this is a benefit, not a constraint.
-- If a user wants gateway features (failover, caching, spend limits), they can run a LiteLLM Proxy and point Orchestra at it without any engine changes.
+- LiteLLM becomes a required dependency for the Python v1 runtime.
+- Provider API keys are configured per-provider in the environment, using LiteLLM's standard conventions.
+- Agent configs reference `model_profile` instead of raw model names.
+- Orchestra owns a small internal model client abstraction even though LiteLLM handles provider abstraction.
+- Tool definitions and structured outputs should use provider-neutral schemas compatible with LiteLLM.
+- If a user wants gateway features later, they can run LiteLLM Proxy and point model profiles at it without changing agent definitions.
