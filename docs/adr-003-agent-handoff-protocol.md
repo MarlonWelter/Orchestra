@@ -43,7 +43,7 @@ The result contains:
 
 ### `continue`
 
-The active agent hands the task to another agent.
+The active agent delegates a new sub-task forward to another agent.
 
 ```json
 {
@@ -61,7 +61,7 @@ Rules:
 
 ### `return`
 
-The active agent returns the task to the agent that called it.
+The active agent signals that it has completed its contribution and hands the result to the most appropriate next agent.
 
 ```json
 {
@@ -73,8 +73,16 @@ The active agent returns the task to the agent that called it.
 
 Rules:
 
-- `recipient` must be a previous sender in the run history.
-- This is mainly used by specialist agents returning to a manager or coordinator.
+- `recipient` must reference an existing agent in the current team.
+- The recipient does not need to be a previous sender in the run history.
+- `return` is typically used to hand work back to a coordinator or manager, but it may also be used to hand off sideways to another specialist if that is the most appropriate next step.
+
+The distinction between `continue` and `return` is semantic intent, not a routing constraint:
+
+- `continue` means: "I am delegating a new sub-task forward."
+- `return` means: "I have completed my part and am handing the result to whoever should carry it forward."
+
+The engine validates that the recipient exists and is allowed by routing rules, but it does not enforce call-stack semantics.
 
 ### `final`
 
