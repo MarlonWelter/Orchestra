@@ -1,0 +1,27 @@
+team:
+  id: investment_team
+  name: Investment Team
+  entry_agent: george
+  default_energy: 20
+
+models:
+  fake:
+    provider: fake
+    model: fake/default
+
+agents:
+  george:
+    name: George
+    role_prompt: agents/george.md
+    model_profile: fake
+    can_finalize: true
+    can_handoff_to:
+      - warren
+
+  warren:
+    name: Warren
+    role_prompt: agents/warren.md
+    model_profile: fake
+    can_finalize: false
+    can_handoff_to:
+      - george
