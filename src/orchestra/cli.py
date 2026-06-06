@@ -14,8 +14,10 @@ The CLI uses Rich for formatted output.  Transcripts are written to
 
 Provider support
 ----------------
-Only teams with provider: fake are supported in this release.
-Full LiteLLM integration (openai, anthropic, etc.) is available in PR 5.
+Teams with provider: fake use DemoModelClient (no API key needed).
+All other providers (openai, anthropic, bedrock, ollama, …) are routed
+through LiteLLMClient.  Set the appropriate API key environment variable
+before running (e.g. OPENAI_API_KEY, ANTHROPIC_API_KEY).
 """
 
 from __future__ import annotations
@@ -155,23 +157,29 @@ def _build_model_client(team: TeamConfig):
     """
     Instantiate the appropriate ModelClient for the team's model profiles.
 
-    Only 'fake' provider is supported in this release.  Any other provider
-    raises ConfigError with a helpful message.
+    All fake  → DemoModelClient (no network, no API key required).
+    All real  → LiteLLMClient (requires litellm and valid API credentials).
+    Mixed     → ConfigError (not supported).
     """
     from orchestra.demo_client import DemoModelClient
+    from orchestra.litellm_client import LiteLLMClient
 
     providers = {profile.provider for profile in team.models.values()}
-    non_fake = providers - {"fake"}
+    fake_providers = providers & {"fake"}
+    real_providers = providers - {"fake"}
 
-    if non_fake:
+    if fake_providers and real_providers:
         raise ConfigError(
-            f"Provider(s) {sorted(non_fake)} require LiteLLM integration, "
-            f"which is not yet available in this release. "
-            f"To run a demo now, use a team config with 'provider: fake'. "
-            f"Full LiteLLM support is coming in the next release."
+            f"Mixing 'fake' and real providers in the same team is not supported. "
+            f"Real providers found: {sorted(real_providers)}. "
+            f"Use either all fake providers (for demos/testing) or all real providers."
         )
 
-    return DemoModelClient(team)
+    if fake_providers:
+        return DemoModelClient(team)
+
+    # All real providers → LiteLLM
+    return LiteLLMClient(team.models)
 
 
 def _print_team_summary(team: TeamConfig) -> None:

@@ -8,6 +8,7 @@ dependencies = [
     "pyyaml",
     "typer",
     "rich",
+    "litellm",
 ]
 
 [project.scripts]
