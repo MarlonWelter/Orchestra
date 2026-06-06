@@ -197,3 +197,67 @@ def test_missing_entry_agent_key_fails(tmp_path: Path) -> None:
     config_path = write_config(tmp_path, cfg)
     with pytest.raises(ConfigError, match="entry_agent"):
         load_config(config_path)
+
+
+# ---------------------------------------------------------------------------
+# Strict type validation
+# ---------------------------------------------------------------------------
+
+
+def test_can_finalize_string_false_rejected(tmp_path: Path) -> None:
+    """YAML string 'false' must not be silently coerced to True."""
+    cfg = minimal_config(tmp_path)
+    cfg["agents"]["george"]["can_finalize"] = "false"
+    config_path = write_config(tmp_path, cfg)
+    with pytest.raises(ConfigError, match="can_finalize"):
+        load_config(config_path)
+
+
+def test_can_finalize_string_true_rejected(tmp_path: Path) -> None:
+    """YAML string 'true' must not be accepted as a boolean."""
+    cfg = minimal_config(tmp_path)
+    cfg["agents"]["george"]["can_finalize"] = "true"
+    config_path = write_config(tmp_path, cfg)
+    with pytest.raises(ConfigError, match="can_finalize"):
+        load_config(config_path)
+
+
+def test_can_handoff_to_integer_items_rejected(tmp_path: Path) -> None:
+    """Non-string items in can_handoff_to must be rejected."""
+    cfg = minimal_config(tmp_path)
+    cfg["agents"]["george"]["can_handoff_to"] = [123]
+    config_path = write_config(tmp_path, cfg)
+    with pytest.raises(ConfigError, match="can_handoff_to"):
+        load_config(config_path)
+
+
+def test_can_handoff_to_empty_string_rejected(tmp_path: Path) -> None:
+    cfg = minimal_config(tmp_path)
+    cfg["agents"]["george"]["can_handoff_to"] = [""]
+    config_path = write_config(tmp_path, cfg)
+    with pytest.raises(ConfigError, match="can_handoff_to"):
+        load_config(config_path)
+
+
+def test_invalid_temperature_rejected(tmp_path: Path) -> None:
+    cfg = minimal_config(tmp_path)
+    cfg["models"]["fake"]["temperature"] = "warm"
+    config_path = write_config(tmp_path, cfg)
+    with pytest.raises(ConfigError, match="temperature"):
+        load_config(config_path)
+
+
+def test_invalid_max_tokens_rejected(tmp_path: Path) -> None:
+    cfg = minimal_config(tmp_path)
+    cfg["models"]["fake"]["max_tokens"] = -100
+    config_path = write_config(tmp_path, cfg)
+    with pytest.raises(ConfigError, match="max_tokens"):
+        load_config(config_path)
+
+
+def test_invalid_timeout_seconds_rejected(tmp_path: Path) -> None:
+    cfg = minimal_config(tmp_path)
+    cfg["models"]["fake"]["timeout_seconds"] = 0
+    config_path = write_config(tmp_path, cfg)
+    with pytest.raises(ConfigError, match="timeout_seconds"):
+        load_config(config_path)
