@@ -1,0 +1,66 @@
+# Investment Team — Orchestra example configuration
+#
+# A four-agent investment analysis team.
+# George (Portfolio Manager) orchestrates the team and produces the final
+# recommendation after consulting Warren, Elon, and Klaus.
+#
+# PROVIDER NOTE: This config uses openai model profiles.
+# Run `orchestra validate` now — `orchestra run` requires LiteLLM
+# integration (coming in the next release).
+#
+# Usage:
+#   orchestra validate examples/investment_team/team.yaml
+#   orchestra run     examples/investment_team/team.yaml "Should we buy Alphabet?"
+
+team:
+  id: investment_team
+  name: Investment Team
+  entry_agent: george
+  default_energy: 20
+
+models:
+  frontier:
+    provider: openai
+    model: gpt-4o
+    temperature: 0.2
+    max_tokens: 2000
+
+  cheap:
+    provider: openai
+    model: gpt-4o-mini
+    max_tokens: 1000
+
+agents:
+  george:
+    name: George
+    role_prompt: agents/george.md
+    model_profile: frontier
+    can_finalize: true
+    can_handoff_to:
+      - warren
+      - elon
+      - klaus
+
+  warren:
+    name: Warren
+    role_prompt: agents/warren.md
+    model_profile: cheap
+    can_finalize: false
+    can_handoff_to:
+      - george
+
+  elon:
+    name: Elon
+    role_prompt: agents/elon.md
+    model_profile: cheap
+    can_finalize: false
+    can_handoff_to:
+      - george
+
+  klaus:
+    name: Klaus
+    role_prompt: agents/klaus.md
+    model_profile: cheap
+    can_finalize: false
+    can_handoff_to:
+      - george
